@@ -93,10 +93,10 @@ TOO_CLOSE_ALERT_MODE = 1  # 1=开 | 2=关
 
 # 前车起步
 LEAD_START_DETECT_SPEED = 0.5  # 前车低于此km/h视为停止
-LEAD_START_DISTANCE_MIN = 2  # 起步检测最小距离(米)
+LEAD_START_DISTANCE_MIN = 1.5  # 起步检测最小距离(米)
 LEAD_START_DISTANCE_MAX = 10  # 起步检测最大距离(米)
-LEAD_START_CONFIRM_DISTANCE = 7.5  # 距离超过此值确认起步(米)
-LEAD_START_CONFIRM_SPEED = 3  # 前车超过此km/h确认起步
+LEAD_START_CONFIRM_DISTANCE = 3  # 距离超过此值确认起步(米)
+LEAD_START_CONFIRM_SPEED = 2  # 前车超过此km/h确认起步
 LEAD_START_CONFIRM_DIST_CHANGE = 0.5  # 距离变化超过此值确认起步(米)
 LEAD_START_SELF_SPEED_LIMIT = 0.3  # 自车低于此m/s才提醒
 LEAD_START_ALERT_MODE = 1  # 1=开 | 2=关
@@ -827,20 +827,21 @@ class Controls:
           self._lead_too_close_alert_sent = False
 
         # 前车起步
-        if v_lead_kph < LEAD_START_DETECT_SPEED and d_rel < LEAD_START_DISTANCE_MAX and d_rel > LEAD_START_DISTANCE_MIN:
-          self._lead_was_stopped = True
-          self._lead_stop_d_rel = d_rel
-          self._lead_started_sent = False
-        elif self._lead_was_stopped and d_rel >= LEAD_START_CONFIRM_DISTANCE and (v_lead_kph >= LEAD_START_CONFIRM_SPEED or (d_rel - self._lead_stop_d_rel) > LEAD_START_CONFIRM_DIST_CHANGE):
-          if LEAD_START_ALERT_MODE == 1 and not self._lead_started_sent and CS.vEgo < LEAD_START_SELF_SPEED_LIMIT:
-            self.events.add(CustomEventName.leadStartWarning)
-            self._lead_started_sent = True
-            self._lead_was_stopped = False
-            # 检测到前车起步，设置自动resume标志，用于standstill时自动发送resume信号
-            self._lead_started_resume = True
-            self._lead_started_resume_frame = self.sm.frame
-      else:
-        self._lead_was_stopped = False
+if v_lead_kph < LEAD_START_DETECT_SPEED and d_rel < LEAD_START_DISTANCE_MAX and d_rel > LEAD_START_DISTANCE_MIN:
+  self._lead_was_stopped = True
+  self._lead_stop_d_rel = d_rel
+  self._lead_started_sent = False
+elif self._lead_was_stopped and (
+    v_lead_kph >= LEAD_START_CONFIRM_SPEED or
+    (d_rel - self._lead_stop_d_rel) > LEAD_START_CONFIRM_DIST_CHANGE or
+    d_rel >= LEAD_START_CONFIRM_DISTANCE
+):
+  if LEAD_START_ALERT_MODE == 1 and not self._lead_started_sent and CS.vEgo < LEAD_START_SELF_SPEED_LIMIT:
+    self.events.add(CustomEventName.leadStartWarning)
+    self._lead_started_sent = True
+    self._lead_was_stopped = False
+    self._lead_started_resume = True
+    self._lead_started_resume_frame = self.sm.frame
 
       # 视觉静止
       model_v2_data = self.sm['modelV2']
@@ -1027,13 +1028,16 @@ class Controls:
     speeds = self.sm['longitudinalPlan'].speeds
     accels = self.sm['longitudinalPlan'].accels
     if len(speeds):
-      # 跟车起步自动resume（修改版：用vEgo替代cruiseState.standstill）
-      if self._lead_started_resume:
-        if CS.vEgo > 1.0:
-          self._lead_started_resume = False
-        elif (self.sm.frame - self._lead_started_resume_frame) > 500:
-          self._lead_started_resume = False
-      CC.cruiseControl.resume = self.enabled and CS.vEgo < 0.5 and (speeds[-1] > 0.1 or self._lead_started_resume)
+  # 跟车起步自动resume
+  if self._lead_started_resume:
+    if CS.vEgo > 1.0:
+      self._lead_started_resume = False
+    elif (self.sm.frame - self._lead_started_resume_frame) > 150:
+      self._lead_started_resume = False
+
+  CC.cruiseControl.resume = self.enabled and CS.vEgo < 0.5 and (
+    speeds[-1] > 0.1 or self._lead_started_resume
+  )
 
     # 统计数据更新
     v_ego = CS.vEgo
